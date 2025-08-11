@@ -1,0 +1,17 @@
+version: '3.8'
+
+services:
+  telegram-bot:
+    build: .
+    container_name: telegram-bot
+    restart: unless-stopped
+    volumes:
+      # Директория для загруженных файлов
+      - ./data:/app/data
+      # База данных SQLite
+      - ./bot.db:/app/bot.db
+    env_file:
+      - .env
+    environment:
+      - PYTHONUNBUFFERED=1
+    # Убедитесь, что файл .env существует и содержит BOT_TOKEN
