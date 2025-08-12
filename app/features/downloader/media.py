@@ -34,7 +34,7 @@ def _base_ytdlp_opts():
         "file_access_retries": 3,
         "skip_unavailable_fragments": True,
         "fragment_retries": 3,
-        "force_ipv4": True,   # <— помогает при nsig/сетевых глюках
+        "force_ipv4": True,
         "http_headers": {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0 Safari/537.36",
             "Referer": "https://www.instagram.com/",
@@ -43,7 +43,6 @@ def _base_ytdlp_opts():
             "Accept-Encoding": "gzip,deflate",
             "Accept-Charset": "ISO-8859-1,utf-8;q=0.7,*;q=0.7",
         },
-        # Дополнительные опции для YouTube Shorts
         "writeinfojson": False,
         "writethumbnail": False,
         "writesubtitles": False,
@@ -54,69 +53,21 @@ def _base_ytdlp_opts():
     return opts
 
 def _get_instagram_opts(url: str):
-    """Специальные настройки для Instagram"""
     base_opts = _base_ytdlp_opts()
-    
     if "instagram.com" in url or "instagr.am" in url:
-        # Улучшенные заголовки для Instagram
-        base_opts["http_headers"].update({
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
-            "Accept-Language": "en-US,en;q=0.9",
-            "Accept-Encoding": "gzip, deflate, br",
-            "DNT": "1",
-            "Connection": "keep-alive",
-            "Upgrade-Insecure-Requests": "1",
-            "Sec-Fetch-Dest": "document",
-            "Sec-Fetch-Mode": "navigate",
-            "Sec-Fetch-Site": "none",
-            "Sec-Fetch-User": "?1",
-            "Cache-Control": "max-age=0",
-        })
-        
-        # Добавляем cookies если доступны
-        if settings.instagram_cookies and os.path.exists(settings.instagram_cookies):
-            base_opts["cookiefile"] = settings.instagram_cookies
-        
-        # Instagram специфичные настройки
-        base_opts.update({
-            "extractor_args": {
-                "instagram": {
-                    "login": None,  # Отключаем логин через yt-dlp
-                    "password": None,
-                }
-            },
-            "no_check_certificate": True,
-            "extractaudio": False,
-            "ignoreerrors": False,
-            # Дополнительные настройки для обхода ограничений
-            "geo_bypass": True,
-            "geo_bypass_country": "US",  # Пробуем обойти геоблокировку
-            "extractor_retries": 3,
-            "fragment_retries": 5,
-            "retries": 5,
-        })
-        
-        # Если cookies нет, пробуем альтернативные методы
         if not settings.instagram_cookies or not os.path.exists(settings.instagram_cookies):
-            # Добавляем дополнительные заголовки для имитации мобильного приложения
-            base_opts["http_headers"].update({
-                "User-Agent": "Instagram 219.0.0.12.117 Android (30/11; 420dpi; 1080x2400; samsung; SM-G991B; o1s; qcom; en_US; 371665917)",
-                "Accept": "*/*",
-                "Accept-Language": "en-US",
-                "Accept-Encoding": "gzip, deflate",
-                "X-IG-Capabilities": "3brTvw==",
-                "X-IG-App-ID": "936619743392459",
-                "X-Requested-With": "XMLHttpRequest",
-            })
-    
+            raise RuntimeError("Instagram cookies file is not configured or not found")
+        base_opts["cookiefile"] = settings.instagram_cookies
+        base_opts.update({
+            "no_check_certificate": True,
+            "ignoreerrors": False,
+        })
     return base_opts
 
 async def extract_info(url: str) -> MediaMeta:
     try:
         loop = asyncio.get_running_loop()
         def _run():
-            # Используем специальные настройки для Instagram
             base = {**_get_instagram_opts(url), "skip_download": True}
             try:
                 with YoutubeDL({**base, "format": "bestvideo*+bestaudio/best"}) as ydl:
@@ -152,33 +103,27 @@ async def download_media(
         loop = asyncio.get_running_loop()
         max_bytes = max_mb * 1024 * 1024
 
-        # Лестница форматов: от «желательного MP4» к «любому рабочему»
         if kind == "video":
-            # Специальная обработка для YouTube Shorts
             if "youtube.com/shorts" in url or "youtu.be" in url:
                 format_candidates = [
-                    # Пробуем разные комбинации для Shorts
                     "bv*+ba/b[ext=mp4]/b",
                     "bv[height<=1080]+ba/b[height<=1080]",
                     "bv[height<=720]+ba/b[height<=720]",
                     "best[height<=1080]/best[height<=720]",
                     "best[ext=mp4]/best",
-                    "worst[height>=360]",  # Fallback на минимальное качество
+                    "worst[height>=360]",
                     "best"
                 ]
             else:
-                # Специальная обработка для Instagram Reels
                 if "instagram.com" in url or "instagr.am" in url:
                     format_candidates = [
-                        # Instagram специфичные форматы
                         "best[ext=mp4]/best",
                         "best[height<=1080]/best[height<=720]",
                         f"b[height<={prefer_height}]",
-                        "worst[height>=360]",  # Fallback на минимальное качество
+                        "worst[height>=360]",
                         "best"
                     ]
                 else:
-                    # TikTok и другие платформы
                     format_candidates = [
                         f"bv*[ext=mp4][vcodec^=avc1][height<={prefer_height}]+ba[ext=m4a]",
                         f"b[ext=mp4][vcodec^=avc1][height<={prefer_height}]",
@@ -198,7 +143,6 @@ async def download_media(
                 "preferredquality": "192",
             }]
 
-        # Используем системную временную директорию
         tmpdir = tempfile.mkdtemp(prefix="telegram-bot-")
 
         def _convert_to_mp4(src_path: str) -> str:
@@ -226,7 +170,6 @@ async def download_media(
                 last_err = None
 
                 for yformat in format_candidates:
-                    # чистим хвосты от предыдущей попытки
                     for root, _, files in os.walk(tmpdir):
                         for f in files:
                             try: 
@@ -240,9 +183,9 @@ async def download_media(
                         "format": yformat,
                         "postprocessors": postprocessors,
                         "max_filesize": max_bytes,
-                        "merge_output_format": "mp4",  # Принудительно объединяем в MP4
-                        "prefer_ffmpeg": True,  # Предпочитаем FFmpeg для обработки
-                        "ignoreerrors": False,  # Не игнорируем ошибки, чтобы попробовать следующий формат
+                        "merge_output_format": "mp4",
+                        "prefer_ffmpeg": True,
+                        "ignoreerrors": False,
                     }
                     try:
                         with YoutubeDL(opts) as ydl:
@@ -251,7 +194,6 @@ async def download_media(
                         last_err = e
                         continue
 
-                    # ищем полученный файл
                     latest, latest_mtime = None, -1.0
                     for root, _, files in os.walk(tmpdir):
                         for f in files:
@@ -267,7 +209,6 @@ async def download_media(
                         last_err = RuntimeError("No files produced by yt-dlp.")
                         continue
 
-                    # Проверяем, что файл не пустой
                     if os.path.getsize(latest) == 0:
                         try: 
                             os.remove(latest)
@@ -280,20 +221,16 @@ async def download_media(
                         try:
                             latest = _convert_to_mp4(latest)
                         except Exception as e:
-                            # Если конвертация не удалась, используем оригинальный файл
-                            print(f"Warning: FFmpeg conversion failed: {e}")
                             pass
 
                     if os.path.getsize(latest) > max_bytes:
                         raise RuntimeError("Produced file is larger than size limit.")
 
-                    # Копируем файл в новую временную директорию, которую не удаляем
                     new_tmpdir = tempfile.mkdtemp(prefix="telegram-bot-final-")
                     final_path = os.path.join(new_tmpdir, os.path.basename(latest))
                     shutil.copy2(latest, final_path)
                     return final_path
 
-                # если ни один формат не взлетел
                 raise last_err or RuntimeError("All formats failed")
             finally:
                 shutil.rmtree(tmpdir, ignore_errors=True)
