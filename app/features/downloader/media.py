@@ -53,11 +53,71 @@ def _base_ytdlp_opts():
         opts["ffmpeg_location"] = settings.ffmpeg_path
     return opts
 
+def _get_instagram_opts(url: str):
+    """Специальные настройки для Instagram"""
+    base_opts = _base_ytdlp_opts()
+    
+    if "instagram.com" in url or "instagr.am" in url:
+        # Улучшенные заголовки для Instagram
+        base_opts["http_headers"].update({
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
+            "Accept-Language": "en-US,en;q=0.9",
+            "Accept-Encoding": "gzip, deflate, br",
+            "DNT": "1",
+            "Connection": "keep-alive",
+            "Upgrade-Insecure-Requests": "1",
+            "Sec-Fetch-Dest": "document",
+            "Sec-Fetch-Mode": "navigate",
+            "Sec-Fetch-Site": "none",
+            "Sec-Fetch-User": "?1",
+            "Cache-Control": "max-age=0",
+        })
+        
+        # Добавляем cookies если доступны
+        if settings.instagram_cookies and os.path.exists(settings.instagram_cookies):
+            base_opts["cookiefile"] = settings.instagram_cookies
+        
+        # Instagram специфичные настройки
+        base_opts.update({
+            "extractor_args": {
+                "instagram": {
+                    "login": None,  # Отключаем логин через yt-dlp
+                    "password": None,
+                }
+            },
+            "no_check_certificate": True,
+            "extractaudio": False,
+            "ignoreerrors": False,
+            # Дополнительные настройки для обхода ограничений
+            "geo_bypass": True,
+            "geo_bypass_country": "US",  # Пробуем обойти геоблокировку
+            "extractor_retries": 3,
+            "fragment_retries": 5,
+            "retries": 5,
+        })
+        
+        # Если cookies нет, пробуем альтернативные методы
+        if not settings.instagram_cookies or not os.path.exists(settings.instagram_cookies):
+            # Добавляем дополнительные заголовки для имитации мобильного приложения
+            base_opts["http_headers"].update({
+                "User-Agent": "Instagram 219.0.0.12.117 Android (30/11; 420dpi; 1080x2400; samsung; SM-G991B; o1s; qcom; en_US; 371665917)",
+                "Accept": "*/*",
+                "Accept-Language": "en-US",
+                "Accept-Encoding": "gzip, deflate",
+                "X-IG-Capabilities": "3brTvw==",
+                "X-IG-App-ID": "936619743392459",
+                "X-Requested-With": "XMLHttpRequest",
+            })
+    
+    return base_opts
+
 async def extract_info(url: str) -> MediaMeta:
     try:
         loop = asyncio.get_running_loop()
         def _run():
-            base = {**_base_ytdlp_opts(), "skip_download": True}
+            # Используем специальные настройки для Instagram
+            base = {**_get_instagram_opts(url), "skip_download": True}
             try:
                 with YoutubeDL({**base, "format": "bestvideo*+bestaudio/best"}) as ydl:
                     info = ydl.extract_info(url, download=False)
@@ -175,7 +235,7 @@ async def download_media(
                                 pass
 
                     opts = {
-                        **_base_ytdlp_opts(),
+                        **_get_instagram_opts(url),
                         "outtmpl": outtmpl,
                         "format": yformat,
                         "postprocessors": postprocessors,
@@ -184,14 +244,6 @@ async def download_media(
                         "prefer_ffmpeg": True,  # Предпочитаем FFmpeg для обработки
                         "ignoreerrors": False,  # Не игнорируем ошибки, чтобы попробовать следующий формат
                     }
-                    
-                    # Специальные настройки для Instagram
-                    if "instagram.com" in url or "instagr.am" in url:
-                        opts.update({
-                            "cookiefile": None,  # Не используем куки
-                            "no_check_certificate": True,
-                            "extractaudio": False,
-                        })
                     try:
                         with YoutubeDL(opts) as ydl:
                             ydl.extract_info(url, download=True)

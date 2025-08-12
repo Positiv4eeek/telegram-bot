@@ -14,6 +14,7 @@ class Settings:
     ytdlp_timeout: int = int(os.getenv("YTDLP_TIMEOUT", "180"))
 
     ffmpeg_path: str | None = (os.getenv("FFMPEG_PATH") or "").strip() or None
+    instagram_cookies: str | None = (os.getenv("INSTAGRAM_COOKIES") or "").strip() or None
 
     def __post_init__(self):
         if not self.bot_token:
