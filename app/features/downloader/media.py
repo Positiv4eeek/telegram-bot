@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from typing import Literal
 from yt_dlp import YoutubeDL
 from app.core.config import settings
+from typing import Optional, List
 
 @dataclass
 class MediaMeta:
@@ -16,6 +17,11 @@ class MediaMeta:
     filesize_approx: int | None
     webpage_url: str
     extractor: str | None
+
+@dataclass
+class PostMediaItem:
+    kind: Literal["image", "video"]
+    path: str
 
 def _base_ytdlp_opts():
     opts = {
@@ -91,7 +97,163 @@ async def extract_info(url: str) -> MediaMeta:
             extractor=info.get("extractor"),
         )
     except Exception as e:
+        if "instagram.com" in url or "instagr.am" in url:
+            return MediaMeta(
+                title="Instagram",
+                uploader=None,
+                duration=None,
+                filesize_approx=None,
+                webpage_url=url,
+                extractor="instagram",
+            )
         raise RuntimeError(f"Failed to extract info: {e}")
+
+def _download_with_gallery_dl(url: str, kind: Literal["image", "video", "audio"]) -> Optional[str]:
+    try:
+        if not shutil.which("gallery-dl"):
+            return None
+        if not settings.instagram_cookies or not os.path.exists(settings.instagram_cookies):
+            return None
+        tmpdir = tempfile.mkdtemp(prefix="telegram-bot-gdl-")
+        args = [
+            "gallery-dl",
+            "--cookies", settings.instagram_cookies,
+            "-D", tmpdir,
+        ]
+        if kind == "image":
+            args += ["--range", "1"]
+        args.append(url)
+        res = subprocess.run(args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        if res.returncode != 0:
+            shutil.rmtree(tmpdir, ignore_errors=True)
+            return None
+        latest, latest_mtime = None, -1.0
+        for root, _, files in os.walk(tmpdir):
+            for f in files:
+                p = os.path.join(root, f)
+                try:
+                    mt = os.path.getmtime(p)
+                    if mt > latest_mtime:
+                        latest_mtime, latest = mt, p
+                except OSError:
+                    pass
+        if not latest:
+            shutil.rmtree(tmpdir, ignore_errors=True)
+            return None
+        new_tmpdir = tempfile.mkdtemp(prefix="telegram-bot-final-")
+        final_path = os.path.join(new_tmpdir, os.path.basename(latest))
+        shutil.copy2(latest, final_path)
+        shutil.rmtree(tmpdir, ignore_errors=True)
+        return final_path
+    except Exception:
+        return None
+
+def download_instagram_post_media(url: str, max_items: int | None = 10) -> List[PostMediaItem]:
+    if not shutil.which("gallery-dl"):
+        raise RuntimeError("gallery-dl is not installed")
+    if not settings.instagram_cookies or not os.path.exists(settings.instagram_cookies):
+        raise RuntimeError("Instagram cookies file is not configured or not found")
+    tmpdir = tempfile.mkdtemp(prefix="telegram-bot-gdl-album-")
+    try:
+        final_dir = tempfile.mkdtemp(prefix="telegram-bot-final-album-")
+
+        try:
+            ydl_outtmpl = os.path.join(final_dir, "%(id)s.%(ext)s")
+            ydl_opts = {
+                **_get_instagram_opts(url),
+                "outtmpl": ydl_outtmpl,
+                "format": "bestvideo*+bestaudio/best",
+                "merge_output_format": "mp4",
+                "prefer_ffmpeg": True,
+                "quiet": True,
+                "noprogress": True,
+            }
+            with YoutubeDL(ydl_opts) as ydl:
+                ydl.extract_info(url, download=True)
+        except Exception:
+            pass
+
+        args = [
+            "gallery-dl",
+            "--cookies", settings.instagram_cookies,
+            "-D", tmpdir,
+            url,
+        ]
+        res = subprocess.run(args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        if res.returncode != 0:
+            raise RuntimeError("gallery-dl failed to download images")
+
+        media_files: List[tuple[str, float]] = []
+        for root, _, files in os.walk(tmpdir):
+            for f in files:
+                p = os.path.join(root, f)
+                try:
+                    media_files.append((p, os.path.getmtime(p)))
+                except OSError:
+                    continue
+
+        if not media_files:
+            raise RuntimeError("No media downloaded")
+
+        media_files.sort(key=lambda t: t[1])
+        if max_items is not None:
+            media_files = media_files[:max_items]
+
+        items: List[PostMediaItem] = []
+
+        max_bytes = settings.max_mb * 1024 * 1024
+        image_exts = {".jpg", ".jpeg", ".png", ".webp"}
+        video_exts = {".mp4", ".mov", ".webm", ".mkv", ".avi", ".m4v"}
+
+        def convert_to_mp4_if_needed(src_path: str) -> str:
+            root, ext = os.path.splitext(src_path)
+            if ext.lower() == ".mp4":
+                return src_path
+            out_path = os.path.join(final_dir, os.path.basename(root) + ".mp4")
+            cmd = [
+                "ffmpeg", "-y", "-i", src_path,
+                "-c:v", "libx264", "-preset", "veryfast", "-crf", "23",
+                "-c:a", "aac", "-b:a", "192k",
+                out_path,
+            ]
+            subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)
+            if not os.path.exists(out_path) or os.path.getsize(out_path) == 0:
+                raise RuntimeError("ffmpeg conversion failed")
+            return out_path
+
+        existing_video_names = set()
+        for f in os.listdir(final_dir):
+            ext = os.path.splitext(f)[1].lower()
+            if ext in video_exts:
+                existing_video_names.add(os.path.splitext(f)[0])
+
+        for p, _ in media_files:
+            ext = os.path.splitext(p)[1].lower()
+            if ext in image_exts:
+                dst = os.path.join(final_dir, os.path.basename(p))
+                shutil.copy2(p, dst)
+                if os.path.getsize(dst) > 0 and os.path.getsize(dst) <= max_bytes:
+                    items.append(PostMediaItem("image", dst))
+            elif ext in video_exts:
+                base = os.path.splitext(os.path.basename(p))[0]
+                if base in existing_video_names:
+                    continue
+                try:
+                    processed = convert_to_mp4_if_needed(p)
+                except Exception:
+                    processed = p
+                dst = os.path.join(final_dir, os.path.basename(processed))
+                if processed != dst:
+                    shutil.copy2(processed, dst)
+                if os.path.getsize(dst) > 0 and os.path.getsize(dst) <= max_bytes:
+                    items.append(PostMediaItem("video", dst))
+
+        if not items:
+            raise RuntimeError("No media found after processing")
+
+        return items
+    finally:
+        shutil.rmtree(tmpdir, ignore_errors=True)
 
 async def download_media(
     url: str,
@@ -102,6 +264,18 @@ async def download_media(
     try:
         loop = asyncio.get_running_loop()
         max_bytes = max_mb * 1024 * 1024
+
+        if ("instagram.com" in url or "instagr.am" in url) and kind == "image":
+            def _run_image():
+                gdl_path = _download_with_gallery_dl(url, "image")
+                if gdl_path:
+                    return gdl_path
+                raise RuntimeError("Failed to download Instagram image with gallery-dl")
+
+            return await asyncio.wait_for(
+                loop.run_in_executor(None, _run_image),
+                timeout=settings.ytdlp_timeout,
+            )
 
         if kind == "video":
             if "youtube.com/shorts" in url or "youtu.be" in url:
@@ -142,12 +316,7 @@ async def download_media(
                 "preferredcodec": "mp3",
                 "preferredquality": "192",
             }]
-        else:  # image
-            format_candidates = [
-                "b/best",
-                "best"
-            ]
-            postprocessors = []
+        
 
         tmpdir = tempfile.mkdtemp(prefix="telegram-bot-")
 
@@ -186,13 +355,15 @@ async def download_media(
                     opts = {
                         **_get_instagram_opts(url),
                         "outtmpl": outtmpl,
-                        "format": yformat,
                         "postprocessors": postprocessors,
                         "max_filesize": max_bytes,
-                        "merge_output_format": "mp4",
-                        "prefer_ffmpeg": True,
                         "ignoreerrors": False,
                     }
+                    if yformat:
+                        opts["format"] = yformat
+                    if kind == "video":
+                        opts["merge_output_format"] = "mp4"
+                        opts["prefer_ffmpeg"] = True
                     try:
                         with YoutubeDL(opts) as ydl:
                             ydl.extract_info(url, download=True)

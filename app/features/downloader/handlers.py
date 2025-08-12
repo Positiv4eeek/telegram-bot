@@ -2,7 +2,7 @@ from aiogram import Router, F
 from aiogram.filters import Command
 from aiogram.types import Message, FSInputFile
 from app.utils import is_supported_url, is_youtube_regular, fmt_bytes, fmt_seconds
-from app.features.downloader.media import extract_info, download_media
+from app.features.downloader.media import extract_info, download_media, download_instagram_post_media, PostMediaItem
 from app.core.telemetry import log_event
 from app.core.config import settings
 from app.core.db import Session
@@ -32,7 +32,6 @@ async def handle_url(msg: Message):
     try:
         text = msg.text.strip()
         
-        # Проверяем, содержит ли сообщение поддерживаемый URL
         if not is_supported_url(text):
             if is_youtube_regular(text):
                 return await msg.reply(
@@ -43,13 +42,11 @@ async def handle_url(msg: Message):
             elif any(domain in text.lower() for domain in ['youtube.com', 'youtu.be', 'tiktok.com', 'instagram.com', 'instagr.am']):
                 return await msg.reply("❌ Не могу обработать эту ссылку. Поддерживаю только TikTok, YouTube Shorts и Instagram Reels.")
             else:
-                # Если это не похоже на ссылку, игнорируем
                 return
 
         url = text
         await log_event(msg.from_user.id, "get", url)
         
-        # Сразу скачиваем и отправляем без промежуточных сообщений
         try:
             meta = await extract_info(url)
 
@@ -59,15 +56,38 @@ async def handle_url(msg: Message):
             )
 
             if is_instagram_post_image:
-                image_path = await download_media(url, kind="image")
-                await msg.answer_photo(photo=FSInputFile(image_path), caption=f"🖼️ {meta.title}")
-                await save_download_stats(msg.from_user.id, url, image_path, "image")
+                items = await asyncio.get_running_loop().run_in_executor(None, lambda: download_instagram_post_media(url, max_items=10))
+                from aiogram.types import InputMediaPhoto, InputMediaVideo
+                media_group = []
+                for item in items:
+                    if item.kind == "image":
+                        media_group.append(InputMediaPhoto(media=FSInputFile(item.path)))
+                    else:
+                        media_group.append(InputMediaVideo(media=FSInputFile(item.path)))
+
+                batches = [media_group[i:i+5] for i in range(0, len(media_group), 5)]
+                for grp in batches:
+                    for attempt in range(2):
+                        try:
+                            await msg.answer_media_group(grp)
+                            break
+                        except Exception:
+                            if attempt == 0:
+                                await asyncio.sleep(1.0)
+                                continue
+                            raise
+
+                for item in items:
+                    await save_download_stats(msg.from_user.id, url, item.path, item.kind)
+
                 try:
                     import shutil, os
-                    shutil.rmtree(os.path.dirname(image_path), ignore_errors=True)
+                    for item in items:
+                        shutil.rmtree(os.path.dirname(item.path), ignore_errors=True)
                 except:
                     pass
-                await log_event(msg.from_user.id, "download", f"image:{url}")
+
+                await log_event(msg.from_user.id, "download", f"post_album:{url}")
             else:
                 await download_and_send_both(msg, url, meta)
         except Exception as e:
@@ -80,19 +100,15 @@ async def handle_url(msg: Message):
 async def download_and_send_both(msg: Message, url: str, meta):
     """Скачивает и отправляет видео и аудио"""
     try:
-        # Создаем задачи для параллельного скачивания
         video_task = asyncio.create_task(download_media(url, kind="video"))
         audio_task = asyncio.create_task(download_media(url, kind="audio"))
         
         try:
-            # Ждем завершения обеих задач
             video_path, audio_path = await asyncio.gather(video_task, audio_task)
             
-            # Сохраняем статистику
             await save_download_stats(msg.from_user.id, url, video_path, "video")
             await save_download_stats(msg.from_user.id, url, audio_path, "audio")
             
-            # Отправляем видео и аудио раздельными сообщениями
             await msg.answer_video(
                 video=FSInputFile(video_path),
                 caption=f"🎥 {meta.title}"
@@ -101,14 +117,12 @@ async def download_and_send_both(msg: Message, url: str, meta):
                 audio=FSInputFile(audio_path)
             )
             
-            # Удаляем временные директории после отправки
             try:
                 import shutil
-                # Удаляем директории с файлами
                 video_dir = os.path.dirname(video_path)
                 audio_dir = os.path.dirname(audio_path)
                 shutil.rmtree(video_dir, ignore_errors=True)
-                if video_dir != audio_dir:  # Если разные директории
+                if video_dir != audio_dir:
                     shutil.rmtree(audio_dir, ignore_errors=True)
             except:
                 pass
@@ -129,11 +143,9 @@ async def save_download_stats(user_id: int, url: str, file_path: str, kind: str)
         size = os.path.getsize(file_path)
         
         async with Session() as s:
-            # Находим пользователя по tg_id
             user_result = await s.execute(select(User).where(User.tg_id == user_id))
             user = user_result.scalar()
             
-            # Если пользователь не найден, создаем его
             if not user:
                 user = User(
                     tg_id=user_id,
