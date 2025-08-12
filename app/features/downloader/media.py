@@ -95,7 +95,7 @@ async def extract_info(url: str) -> MediaMeta:
 
 async def download_media(
     url: str,
-    kind: Literal["video", "audio"] = "video",
+    kind: Literal["video", "audio", "image"] = "video",
     max_mb: int = settings.max_mb,
     prefer_height: int = 1080,
 ) -> str:
@@ -132,7 +132,7 @@ async def download_media(
                         "best"
                     ]
             postprocessors = []
-        else:
+        elif kind == "audio":
             format_candidates = [
                 "bestaudio[ext=m4a]/bestaudio[ext=mp3]/bestaudio/best",
                 "bestaudio/best"
@@ -142,6 +142,12 @@ async def download_media(
                 "preferredcodec": "mp3",
                 "preferredquality": "192",
             }]
+        else:  # image
+            format_candidates = [
+                "b/best",
+                "best"
+            ]
+            postprocessors = []
 
         tmpdir = tempfile.mkdtemp(prefix="telegram-bot-")
 

@@ -52,8 +52,24 @@ async def handle_url(msg: Message):
         # Сразу скачиваем и отправляем без промежуточных сообщений
         try:
             meta = await extract_info(url)
-            
-            await download_and_send_both(msg, url, meta)
+
+            is_instagram_post_image = (
+                ("instagram.com" in url or "instagr.am" in url)
+                and "/p/" in url
+            )
+
+            if is_instagram_post_image:
+                image_path = await download_media(url, kind="image")
+                await msg.answer_photo(photo=FSInputFile(image_path), caption=f"🖼️ {meta.title}")
+                await save_download_stats(msg.from_user.id, url, image_path, "image")
+                try:
+                    import shutil, os
+                    shutil.rmtree(os.path.dirname(image_path), ignore_errors=True)
+                except:
+                    pass
+                await log_event(msg.from_user.id, "download", f"image:{url}")
+            else:
+                await download_and_send_both(msg, url, meta)
         except Exception as e:
             await log_event(msg.from_user.id, "error", f"extract: {e}")
             await msg.reply(f"❌ Ошибка: {format_error_message(str(e))}")
