@@ -255,6 +255,40 @@ def download_instagram_post_media(url: str, max_items: int | None = 10) -> List[
     finally:
         shutil.rmtree(tmpdir, ignore_errors=True)
 
+def download_tiktok_images(url: str, max_items: int | None = 10) -> List[str]:
+    if not shutil.which("gallery-dl"):
+        raise RuntimeError("gallery-dl is not installed")
+    tmpdir = tempfile.mkdtemp(prefix="telegram-bot-gdl-tt-")
+    try:
+        args = [
+            "gallery-dl",
+            "-D", tmpdir,
+            url,
+        ]
+        res = subprocess.run(args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        if res.returncode != 0:
+            raise RuntimeError("gallery-dl failed to download tiktok images")
+        images: List[str] = []
+        for root, _, files in os.walk(tmpdir):
+            for f in files:
+                p = os.path.join(root, f)
+                if os.path.splitext(p)[1].lower() in {".jpg", ".jpeg", ".png", ".webp"}:
+                    images.append(p)
+        if not images:
+            raise RuntimeError("No images downloaded")
+        images.sort(key=lambda p: os.path.getmtime(p))
+        if max_items is not None:
+            images = images[:max_items]
+        final_dir = tempfile.mkdtemp(prefix="telegram-bot-final-tt-")
+        out: List[str] = []
+        for p in images:
+            dst = os.path.join(final_dir, os.path.basename(p))
+            shutil.copy2(p, dst)
+            out.append(dst)
+        return out
+    finally:
+        shutil.rmtree(tmpdir, ignore_errors=True)
+
 async def download_media(
     url: str,
     kind: Literal["video", "audio", "image"] = "video",

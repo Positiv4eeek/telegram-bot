@@ -2,7 +2,7 @@ from aiogram import Router, F
 from aiogram.filters import Command
 from aiogram.types import Message, FSInputFile
 from app.utils import is_supported_url, is_youtube_regular, fmt_bytes, fmt_seconds
-from app.features.downloader.media import extract_info, download_media, download_instagram_post_media, PostMediaItem
+from app.features.downloader.media import extract_info, download_media, download_instagram_post_media, PostMediaItem, download_tiktok_images
 from app.core.telemetry import log_event
 from app.core.config import settings
 from app.core.db import Session
@@ -46,7 +46,7 @@ async def handle_url(msg: Message):
 
         url = text
         await log_event(msg.from_user.id, "get", url)
-        
+
         try:
             meta = await extract_info(url)
 
@@ -65,7 +65,7 @@ async def handle_url(msg: Message):
                     else:
                         media_group.append(InputMediaVideo(media=FSInputFile(item.path)))
 
-                batches = [media_group[i:i+5] for i in range(0, len(media_group), 5)]
+                batches = [media_group[i:i+10] for i in range(0, len(media_group), 10)]
                 for grp in batches:
                     for attempt in range(2):
                         try:
@@ -89,6 +89,34 @@ async def handle_url(msg: Message):
 
                 await log_event(msg.from_user.id, "download", f"post_album:{url}")
             else:
+                if "tiktok.com" in url:
+                    try:
+                        pics = await asyncio.get_running_loop().run_in_executor(None, lambda: download_tiktok_images(url, max_items=10))
+                        from aiogram.types import InputMediaPhoto
+                        media_group = [InputMediaPhoto(media=FSInputFile(p)) for p in pics]
+                        batches = [media_group[i:i+10] for i in range(0, len(media_group), 10)]
+                        for grp in batches:
+                            for attempt in range(2):
+                                try:
+                                    await msg.answer_media_group(grp)
+                                    break
+                                except Exception:
+                                    if attempt == 0:
+                                        await asyncio.sleep(1.0)
+                                        continue
+                                    raise
+                        for p in pics:
+                            await save_download_stats(msg.from_user.id, url, p, "image")
+                        try:
+                            import shutil
+                            for p in pics:
+                                shutil.rmtree(os.path.dirname(p), ignore_errors=True)
+                        except:
+                            pass
+                        await log_event(msg.from_user.id, "download", f"tiktok_images:{url}")
+                        return
+                    except Exception:
+                        pass
                 await download_and_send_both(msg, url, meta)
         except Exception as e:
             await log_event(msg.from_user.id, "error", f"extract: {e}")

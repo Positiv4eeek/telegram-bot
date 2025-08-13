@@ -76,3 +76,6 @@ ffmpeg
 # Deployment
 deploy.sh
 .deploy/
+
+# Cookies
+cookies.txt
