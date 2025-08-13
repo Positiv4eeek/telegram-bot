@@ -56,7 +56,7 @@ async def handle_url(msg: Message):
             except Exception as e:
                 if "tiktok.com" in url:
                     try:
-                        pics = await asyncio.get_running_loop().run_in_executor(None, lambda: download_tiktok_images(url, max_items=10))
+                        pics = await asyncio.get_running_loop().run_in_executor(None, lambda: download_tiktok_images(url, max_items=None))
                         from aiogram.types import InputMediaPhoto
                         media_group = [InputMediaPhoto(media=FSInputFile(p)) for p in pics]
                         batches = [media_group[i:i+10] for i in range(0, len(media_group), 10)]
@@ -90,7 +90,7 @@ async def handle_url(msg: Message):
             )
 
             if is_instagram_post_image:
-                items = await asyncio.get_running_loop().run_in_executor(None, lambda: download_instagram_post_media(url, max_items=10))
+                items = await asyncio.get_running_loop().run_in_executor(None, lambda: download_instagram_post_media(url, max_items=None))
                 from aiogram.types import InputMediaPhoto, InputMediaVideo
                 media_group = []
                 for item in items:
@@ -125,7 +125,7 @@ async def handle_url(msg: Message):
             else:
                 if "tiktok.com" in url:
                     try:
-                        pics = await asyncio.get_running_loop().run_in_executor(None, lambda: download_tiktok_images(url, max_items=10))
+                        pics = await asyncio.get_running_loop().run_in_executor(None, lambda: download_tiktok_images(url, max_items=None))
                         from aiogram.types import InputMediaPhoto
                         media_group = [InputMediaPhoto(media=FSInputFile(p)) for p in pics]
                         batches = [media_group[i:i+10] for i in range(0, len(media_group), 10)]
