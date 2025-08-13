@@ -47,8 +47,42 @@ async def handle_url(msg: Message):
         url = text
         await log_event(msg.from_user.id, "get", url)
 
+        
+
         try:
-            meta = await extract_info(url)
+            meta = None
+            try:
+                meta = await extract_info(url)
+            except Exception as e:
+                if "tiktok.com" in url:
+                    try:
+                        pics = await asyncio.get_running_loop().run_in_executor(None, lambda: download_tiktok_images(url, max_items=10))
+                        from aiogram.types import InputMediaPhoto
+                        media_group = [InputMediaPhoto(media=FSInputFile(p)) for p in pics]
+                        batches = [media_group[i:i+10] for i in range(0, len(media_group), 10)]
+                        for grp in batches:
+                            for attempt in range(2):
+                                try:
+                                    await msg.answer_media_group(grp)
+                                    break
+                                except Exception:
+                                    if attempt == 0:
+                                        await asyncio.sleep(1.0)
+                                        continue
+                                    raise
+                        for p in pics:
+                            await save_download_stats(msg.from_user.id, url, p, "image")
+                        try:
+                            import shutil
+                            for p in pics:
+                                shutil.rmtree(os.path.dirname(p), ignore_errors=True)
+                        except:
+                            pass
+                        await log_event(msg.from_user.id, "download", f"tiktok_images:{url}")
+                        return
+                    except Exception:
+                        pass
+                raise
 
             is_instagram_post_image = (
                 ("instagram.com" in url or "instagr.am" in url)
