@@ -20,7 +20,9 @@ DATABASE_URL=sqlite+aiosqlite:///./bot.db
 MAX_MB=48
 YTDLP_TIMEOUT=180
 # Для Instagram:
-INSTAGRAM_COOKIES=/abs/path/to/instagram_cookies.txt
+INSTAGRAM_COOKIES=/abs/path/to/instagram_cookies.
+# FFmpeg (если не в PATH)
+FFMPEG_PATH=
 ```
 
 4) Запуск
