@@ -547,9 +547,8 @@ def download_tiktok_sound(url: str, is_photo: bool = False) -> str:
         raise RuntimeError(f"Failed to fetch audio: {e}")
 
 def download_spotify_track(url: str, max_mb: int = None) -> str:
-    """Скачивает трек из Spotify используя spotdl"""
     if not shutil.which("spotdl"):
-        raise RuntimeError("spotdl не установлен. Установите: pip install spotdl")
+        raise RuntimeError("spotdl not found")
     
     if max_mb is None:
         max_mb = settings.max_mb
