@@ -6,6 +6,7 @@ YOUTUBE_HOST_RE = re.compile(r"(?:^|\.)youtube\.com$", re.I)
 YOUTU_BE_HOST_RE = re.compile(r"(?:^|\.)youtu\.be$", re.I)
 TIKTOK_HOST_RE = re.compile(r"(?:^|\.)tiktok\.com$", re.I)
 INSTAGRAM_HOST_RE = re.compile(r"(?:^|\.)instagram\.com$|(?:^|\.)instagr\.am$", re.I)
+SPOTIFY_HOST_RE = re.compile(r"(?:^|\.)spotify\.com$", re.I)
 
 
 def _host(url: str) -> str:
@@ -44,18 +45,23 @@ def is_instagram_reel(url: str) -> bool:
         if not INSTAGRAM_HOST_RE.search(h):
             return False
         p = (urlparse(url).path or "").lower()
-        # Поддерживаем разные форматы Instagram URLs
         return (p.startswith("/reel/") or 
                 p.startswith("/reels/") or 
-                p.startswith("/p/") or  # Обычные посты могут быть видео
+                p.startswith("/p/") or
                 "/reel/" in p or 
                 "/reels/" in p)
     except Exception:
         return False
 
+def is_spotify(url: str) -> bool:
+    try:
+        return bool(SPOTIFY_HOST_RE.search(_host(url)))
+    except Exception:
+        return False
+
 def is_supported_url(url: str) -> bool:
     try:
-        return is_tiktok(url) or is_youtube_shorts(url) or is_instagram_reel(url)
+        return is_tiktok(url) or is_youtube_shorts(url) or is_instagram_reel(url) or is_spotify(url)
     except Exception:
         return False
 

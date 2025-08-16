@@ -10,6 +10,7 @@ from app.features.downloader.media import (
     download_instagram_post_media,
     download_tiktok_images,
     download_tiktok_sound,
+    download_spotify_track,
 )
 from app.core.telemetry import log_event
 from app.core.config import settings
@@ -34,11 +35,12 @@ async def resolve_redirect(url: str) -> str:
 @router.message(Command("start"))
 async def start(msg: Message):
     await msg.answer(
-        "\U0001F3AC Привет! Я бот для скачивания видео.\n\n"
+        "\U0001F3AC Привет! Я бот для скачивания видео и музыки.\n\n"
         "\U0001F4F1 Просто пришли мне ссылку на:\n"
         "• TikTok видео\n"
         "• YouTube Shorts\n"
         "• Instagram Reels\n"
+        "• Spotify треки\n"
         "\U0001F3A5 Я автоматически скачаю видео и аудио!\n"
         "\U0001F4CA Статистика: /me\n\n"
         f"\U0001F4E6 Лимит файла: {settings.max_mb} MB"
@@ -51,11 +53,11 @@ async def handle_url(msg: Message):
         if is_youtube_regular(text):
             return await msg.reply(
                 "❌ Поддерживаю только **YouTube Shorts**, а не обычные видео.\n"
-                "Попробуйте ссылку на Shorts, TikTok или Instagram Reels.",
+                "Попробуйте ссылку на Shorts, TikTok, Instagram Reels или Spotify.",
                 parse_mode="Markdown"
             )
-        elif any(d in text.lower() for d in ["youtube.com", "youtu.be", "tiktok.com", "instagram.com", "instagr.am"]):
-            return await msg.reply("❌ Не могу обработать эту ссылку. Поддерживаю только TikTok, YouTube Shorts и Instagram Reels.")
+        elif any(d in text.lower() for d in ["youtube.com", "youtu.be", "tiktok.com", "instagram.com", "instagr.am", "spotify.com"]):
+            return await msg.reply("❌ Не могу обработать эту ссылку. Поддерживаю только TikTok, YouTube Shorts, Instagram Reels и Spotify.")
         else:
             return
 
@@ -67,7 +69,9 @@ async def handle_url(msg: Message):
     loading_msg = await msg.reply("🔄 Загружаю медиа, подождите немного...")
 
     try:
-        if "tiktok.com" in url and "/photo/" in url:
+        if "spotify.com" in url:
+            await send_spotify_track(msg, url)
+        elif "tiktok.com" in url and "/photo/" in url:
             await send_tiktok_album(msg, url, is_photo=True)
         elif ("instagram.com" in url or "instagr.am" in url) and "/p/" in url:
             await send_instagram_post_album(msg, url)
@@ -84,6 +88,24 @@ async def handle_url(msg: Message):
             await loading_msg.delete()
         except TelegramBadRequest:
             pass
+
+async def send_spotify_track(msg: Message, url: str):
+    """Отправляет скачанный трек из Spotify"""
+    try:
+        loop = asyncio.get_running_loop()
+        track_path = await loop.run_in_executor(None, lambda: download_spotify_track(url))
+        
+        await msg.answer_audio(
+            audio=FSInputFile(track_path), 
+            caption="🎵 Трек из Spotify"
+        )
+        
+        await save_download_stats(msg.from_user.id, url, track_path, "audio")
+        await log_event(msg.from_user.id, "download", f"spotify:{url}")
+        
+    except Exception as e:
+        await msg.reply(f"❌ Не удалось скачать трек из Spotify: {e}")
+        await log_event(msg.from_user.id, "error", f"spotify_download: {e}")
 
 async def send_tiktok_album(msg: Message, url: str, is_photo: bool = False):
     loop = asyncio.get_running_loop()

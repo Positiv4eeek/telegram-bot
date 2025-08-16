@@ -545,3 +545,58 @@ def download_tiktok_sound(url: str, is_photo: bool = False) -> str:
     except Exception as e:
         shutil.rmtree(tmp, ignore_errors=True)
         raise RuntimeError(f"Failed to fetch audio: {e}")
+
+def download_spotify_track(url: str, max_mb: int = None) -> str:
+    """Скачивает трек из Spotify используя spotdl"""
+    if not shutil.which("spotdl"):
+        raise RuntimeError("spotdl не установлен. Установите: pip install spotdl")
+    
+    if max_mb is None:
+        max_mb = settings.max_mb
+    
+    max_bytes = max_mb * 1024 * 1024
+    
+    tmpdir = tempfile.mkdtemp(prefix="telegram-bot-spotify-")
+    final_dir = tempfile.mkdtemp(prefix="telegram-bot-spotify-final-")
+    
+    try:
+        cmd = [
+            "spotdl", 
+            "download",
+            url
+        ]
+        
+        result = subprocess.run(
+            cmd, 
+            capture_output=True, 
+            text=True, 
+            timeout=300,
+            cwd=tmpdir
+        )
+        
+        if result.returncode != 0:
+            raise RuntimeError(f"spotdl failed: {result.stderr}")
+        
+        downloaded_files = []
+        for root, _, files in os.walk(tmpdir):
+            for file in files:
+                if file.endswith('.mp3'):
+                    file_path = os.path.join(root, file)
+                    downloaded_files.append((file_path, os.path.getmtime(file_path)))
+        
+        if not downloaded_files:
+            raise RuntimeError("No files downloaded by spotdl")
+        
+        downloaded_files.sort(key=lambda x: x[1], reverse=True)
+        source_file = downloaded_files[0][0]
+        
+        if os.path.getsize(source_file) > max_bytes:
+            raise RuntimeError(f"File too large: {os.path.getsize(source_file)} bytes")
+        
+        final_path = os.path.join(final_dir, os.path.basename(source_file))
+        shutil.copy2(source_file, final_path)
+        
+        return final_path
+        
+    finally:
+        shutil.rmtree(tmpdir, ignore_errors=True)
