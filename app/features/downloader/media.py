@@ -4,10 +4,9 @@ import shutil
 import tempfile
 import subprocess
 from dataclasses import dataclass
-from typing import Literal
+from typing import Literal, Optional, List
 from yt_dlp import YoutubeDL
 from app.core.config import settings
-from typing import Optional, List
 
 @dataclass
 class MediaMeta:
@@ -42,12 +41,10 @@ def _base_ytdlp_opts():
         "fragment_retries": 3,
         "force_ipv4": True,
         "http_headers": {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0 Safari/537.36",
+            "User-Agent": "Mozilla/5.0",
             "Referer": "https://www.instagram.com/",
             "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
             "Accept-Language": "en-us,en;q=0.5",
-            "Accept-Encoding": "gzip,deflate",
-            "Accept-Charset": "ISO-8859-1,utf-8;q=0.7,*;q=0.7",
         },
         "writeinfojson": False,
         "writethumbnail": False,
@@ -73,21 +70,19 @@ def _get_instagram_opts(url: str):
 async def extract_info(url: str) -> MediaMeta:
     try:
         loop = asyncio.get_running_loop()
+
         def _run():
             base = {**_get_instagram_opts(url), "skip_download": True}
-            try:
-                with YoutubeDL({**base, "format": "bestvideo*+bestaudio/best"}) as ydl:
-                    info = ydl.extract_info(url, download=False)
-            except Exception:
-                with YoutubeDL(base) as ydl:
-                    info = ydl.extract_info(url, download=False)
-            if info.get("_type") == "playlist" and info.get("entries"):
-                for e in info["entries"] or []:
-                    if e:
-                        info = e
-                        break
-            return info
+            with YoutubeDL({**base, "format": "bestvideo*+bestaudio/best"}) as ydl:
+                info = ydl.extract_info(url, download=False)
+                if info.get("_type") == "playlist" and info.get("entries"):
+                    for e in info["entries"] or []:
+                        if e:
+                            return e
+                return info
+
         info = await loop.run_in_executor(None, _run)
+
         return MediaMeta(
             title=info.get("title") or "untitled",
             uploader=info.get("uploader"),
@@ -97,56 +92,43 @@ async def extract_info(url: str) -> MediaMeta:
             extractor=info.get("extractor"),
         )
     except Exception as e:
-        if "instagram.com" in url or "instagr.am" in url:
-            return MediaMeta(
-                title="Instagram",
-                uploader=None,
-                duration=None,
-                filesize_approx=None,
-                webpage_url=url,
-                extractor="instagram",
-            )
         raise RuntimeError(f"Failed to extract info: {e}")
 
-def _download_with_gallery_dl(url: str, kind: Literal["image", "video", "audio"]) -> Optional[str]:
+def download_tiktok_images(url: str, max_items: int | None = 10) -> List[str]:
+    if not shutil.which("gallery-dl"):
+        raise RuntimeError("gallery-dl is not installed")
+
+    tmpdir = tempfile.mkdtemp(prefix="telegram-bot-gdl-tt-")
     try:
-        if not shutil.which("gallery-dl"):
-            return None
-        if not settings.instagram_cookies or not os.path.exists(settings.instagram_cookies):
-            return None
-        tmpdir = tempfile.mkdtemp(prefix="telegram-bot-gdl-")
-        args = [
-            "gallery-dl",
-            "--cookies", settings.instagram_cookies,
-            "-D", tmpdir,
-        ]
-        if kind == "image":
-            args += ["--range", "1"]
-        args.append(url)
-        res = subprocess.run(args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        args = ["gallery-dl", "-D", tmpdir, url]
+        res = subprocess.run(args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=15)
         if res.returncode != 0:
-            shutil.rmtree(tmpdir, ignore_errors=True)
-            return None
-        latest, latest_mtime = None, -1.0
+            raise RuntimeError("gallery-dl failed to download tiktok images")
+
+        images = []
         for root, _, files in os.walk(tmpdir):
             for f in files:
                 p = os.path.join(root, f)
-                try:
-                    mt = os.path.getmtime(p)
-                    if mt > latest_mtime:
-                        latest_mtime, latest = mt, p
-                except OSError:
-                    pass
-        if not latest:
-            shutil.rmtree(tmpdir, ignore_errors=True)
-            return None
-        new_tmpdir = tempfile.mkdtemp(prefix="telegram-bot-final-")
-        final_path = os.path.join(new_tmpdir, os.path.basename(latest))
-        shutil.copy2(latest, final_path)
+                if os.path.splitext(p)[1].lower() in {".jpg", ".jpeg", ".png", ".webp"}:
+                    images.append(p)
+
+        if not images:
+            raise RuntimeError("No images downloaded")
+
+        images.sort(key=lambda p: os.path.getmtime(p))
+        if max_items is not None:
+            images = images[:max_items]
+
+        final_dir = tempfile.mkdtemp(prefix="telegram-bot-final-tt-")
+        out = []
+        for p in images:
+            dst = os.path.join(final_dir, os.path.basename(p))
+            shutil.copy2(p, dst)
+            out.append(dst)
+
+        return out
+    finally:
         shutil.rmtree(tmpdir, ignore_errors=True)
-        return final_path
-    except Exception:
-        return None
 
 def download_instagram_post_media(url: str, max_items: int | None = 10) -> List[PostMediaItem]:
     if not shutil.which("gallery-dl"):
@@ -255,40 +237,6 @@ def download_instagram_post_media(url: str, max_items: int | None = 10) -> List[
     finally:
         shutil.rmtree(tmpdir, ignore_errors=True)
 
-def download_tiktok_images(url: str, max_items: int | None = 10) -> List[str]:
-    if not shutil.which("gallery-dl"):
-        raise RuntimeError("gallery-dl is not installed")
-    tmpdir = tempfile.mkdtemp(prefix="telegram-bot-gdl-tt-")
-    try:
-        args = [
-            "gallery-dl",
-            "-D", tmpdir,
-            url,
-        ]
-        res = subprocess.run(args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        if res.returncode != 0:
-            raise RuntimeError("gallery-dl failed to download tiktok images")
-        images: List[str] = []
-        for root, _, files in os.walk(tmpdir):
-            for f in files:
-                p = os.path.join(root, f)
-                if os.path.splitext(p)[1].lower() in {".jpg", ".jpeg", ".png", ".webp"}:
-                    images.append(p)
-        if not images:
-            raise RuntimeError("No images downloaded")
-        images.sort(key=lambda p: os.path.getmtime(p))
-        if max_items is not None:
-            images = images[:max_items]
-        final_dir = tempfile.mkdtemp(prefix="telegram-bot-final-tt-")
-        out: List[str] = []
-        for p in images:
-            dst = os.path.join(final_dir, os.path.basename(p))
-            shutil.copy2(p, dst)
-            out.append(dst)
-        return out
-    finally:
-        shutil.rmtree(tmpdir, ignore_errors=True)
-
 async def download_media(
     url: str,
     kind: Literal["video", "audio", "image"] = "video",
@@ -299,152 +247,103 @@ async def download_media(
         loop = asyncio.get_running_loop()
         max_bytes = max_mb * 1024 * 1024
 
-        if ("instagram.com" in url or "instagr.am" in url) and kind == "image":
-            def _run_image():
-                gdl_path = _download_with_gallery_dl(url, "image")
-                if gdl_path:
-                    return gdl_path
-                raise RuntimeError("Failed to download Instagram image with gallery-dl")
+        format_candidates = [
+            "bv*+ba/b[ext=mp4]/b",
+            "bv[height<=1080]+ba/b[height<=1080]",
+            "bv[height<=720]+ba/b[height<=720]",
+            "best[height<=1080]/best[height<=720]",
+            "best[ext=mp4]/best",
+            "worst[height>=360]",
+            "best"
+        ] if kind == "video" else [
+            "bestaudio[ext=m4a]/bestaudio[ext=mp3]/bestaudio/best",
+            "bestaudio/best"
+        ]
 
-            return await asyncio.wait_for(
-                loop.run_in_executor(None, _run_image),
-                timeout=settings.ytdlp_timeout,
-            )
-
-        if kind == "video":
-            if "youtube.com/shorts" in url or "youtu.be" in url:
-                format_candidates = [
-                    "bv*+ba/b[ext=mp4]/b",
-                    "bv[height<=1080]+ba/b[height<=1080]",
-                    "bv[height<=720]+ba/b[height<=720]",
-                    "best[height<=1080]/best[height<=720]",
-                    "best[ext=mp4]/best",
-                    "worst[height>=360]",
-                    "best"
-                ]
-            else:
-                if "instagram.com" in url or "instagr.am" in url:
-                    format_candidates = [
-                        "best[ext=mp4]/best",
-                        "best[height<=1080]/best[height<=720]",
-                        f"b[height<={prefer_height}]",
-                        "worst[height>=360]",
-                        "best"
-                    ]
-                else:
-                    format_candidates = [
-                        f"bv*[ext=mp4][vcodec^=avc1][height<={prefer_height}]+ba[ext=m4a]",
-                        f"b[ext=mp4][vcodec^=avc1][height<={prefer_height}]",
-                        f"b[height<={prefer_height}]",
-                        "best[ext=mp4]/best",
-                        "best"
-                    ]
-            postprocessors = []
-        elif kind == "audio":
-            format_candidates = [
-                "bestaudio[ext=m4a]/bestaudio[ext=mp3]/bestaudio/best",
-                "bestaudio/best"
-            ]
-            postprocessors = [{
-                "key": "FFmpegExtractAudio",
-                "preferredcodec": "mp3",
-                "preferredquality": "192",
-            }]
-        
+        postprocessors = [{
+            "key": "FFmpegExtractAudio",
+            "preferredcodec": "mp3",
+            "preferredquality": "192",
+        }] if kind == "audio" else []
 
         tmpdir = tempfile.mkdtemp(prefix="telegram-bot-")
 
         def _convert_to_mp4(src_path: str) -> str:
-            try:
-                root, ext = os.path.splitext(src_path)
-                if ext.lower() == ".mp4":
-                    return src_path
-                out_path = root + ".__mp4__.mp4"
-                cmd = [
-                    "ffmpeg", "-y", "-i", src_path,
-                    "-c:v", "libx264", "-preset", "veryfast", "-crf", "23",
-                    "-c:a", "aac", "-b:a", "192k",
-                    out_path
-                ]
-                subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)
-                if not os.path.exists(out_path) or os.path.getsize(out_path) == 0:
-                    raise RuntimeError("ffmpeg conversion failed")
-                return out_path
-            except Exception as e:
-                raise RuntimeError(f"FFmpeg conversion failed: {e}")
+            root, ext = os.path.splitext(src_path)
+            if ext.lower() == ".mp4":
+                return src_path
+            out_path = root + ".__mp4__.mp4"
+            cmd = [
+                "ffmpeg", "-y", "-i", src_path,
+                "-c:v", "libx264", "-preset", "veryfast", "-crf", "23",
+                "-c:a", "aac", "-b:a", "192k",
+                out_path
+            ]
+            subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)
+            if not os.path.exists(out_path) or os.path.getsize(out_path) == 0:
+                raise RuntimeError("ffmpeg conversion failed")
+            return out_path
 
         def _run():
-            try:
-                outtmpl = os.path.join(tmpdir, "%(title).80s.%(ext)s")
-                last_err = None
+            outtmpl = os.path.join(tmpdir, "%(title).80s.%(ext)s")
+            last_err = None
 
-                for yformat in format_candidates:
-                    for root, _, files in os.walk(tmpdir):
-                        for f in files:
-                            try: 
-                                os.remove(os.path.join(root, f))
-                            except: 
-                                pass
+            for yformat in format_candidates:
+                for root, _, files in os.walk(tmpdir):
+                    for f in files:
+                        try: os.remove(os.path.join(root, f))
+                        except: pass
 
-                    opts = {
-                        **_get_instagram_opts(url),
-                        "outtmpl": outtmpl,
-                        "postprocessors": postprocessors,
-                        "max_filesize": max_bytes,
-                        "ignoreerrors": False,
-                    }
-                    if yformat:
-                        opts["format"] = yformat
-                    if kind == "video":
-                        opts["merge_output_format"] = "mp4"
-                        opts["prefer_ffmpeg"] = True
-                    try:
-                        with YoutubeDL(opts) as ydl:
-                            ydl.extract_info(url, download=True)
-                    except Exception as e:
-                        last_err = e
-                        continue
+                opts = {
+                    **_get_instagram_opts(url),
+                    "outtmpl": outtmpl,
+                    "postprocessors": postprocessors,
+                    "max_filesize": max_bytes,
+                    "ignoreerrors": False,
+                }
 
-                    latest, latest_mtime = None, -1.0
-                    for root, _, files in os.walk(tmpdir):
-                        for f in files:
-                            p = os.path.join(root, f)
-                            try:
-                                mt = os.path.getmtime(p)
-                                if mt > latest_mtime:
-                                    latest_mtime, latest = mt, p
-                            except OSError:
-                                pass
+                if yformat:
+                    opts["format"] = yformat
+                if kind == "video":
+                    opts["merge_output_format"] = "mp4"
+                    opts["prefer_ffmpeg"] = True
 
-                    if not latest:
-                        last_err = RuntimeError("No files produced by yt-dlp.")
-                        continue
+                try:
+                    with YoutubeDL(opts) as ydl:
+                        ydl.extract_info(url, download=True)
+                except Exception as e:
+                    last_err = e
+                    continue
 
-                    if os.path.getsize(latest) == 0:
-                        try: 
-                            os.remove(latest)
-                        except: 
-                            pass
-                        last_err = RuntimeError("The downloaded file is empty")
-                        continue
-
-                    if kind == "video":
+                latest, latest_mtime = None, -1.0
+                for root, _, files in os.walk(tmpdir):
+                    for f in files:
+                        p = os.path.join(root, f)
                         try:
-                            latest = _convert_to_mp4(latest)
-                        except Exception as e:
+                            mt = os.path.getmtime(p)
+                            if mt > latest_mtime:
+                                latest_mtime, latest = mt, p
+                        except OSError:
                             pass
 
-                    if os.path.getsize(latest) > max_bytes:
-                        raise RuntimeError("Produced file is larger than size limit.")
+                if not latest or os.path.getsize(latest) == 0:
+                    last_err = RuntimeError("No valid media file downloaded")
+                    continue
 
-                    new_tmpdir = tempfile.mkdtemp(prefix="telegram-bot-final-")
-                    final_path = os.path.join(new_tmpdir, os.path.basename(latest))
-                    shutil.copy2(latest, final_path)
-                    return final_path
+                if kind == "video":
+                    try:
+                        latest = _convert_to_mp4(latest)
+                    except Exception:
+                        pass
 
-                raise last_err or RuntimeError("All formats failed")
-            finally:
-                shutil.rmtree(tmpdir, ignore_errors=True)
+                if os.path.getsize(latest) > max_bytes:
+                    raise RuntimeError("Produced file is larger than size limit.")
+
+                final_path = os.path.join(tempfile.mkdtemp(prefix="telegram-bot-final-"), os.path.basename(latest))
+                shutil.copy2(latest, final_path)
+                return final_path
+
+            raise last_err or RuntimeError("All formats failed")
 
         return await asyncio.wait_for(loop.run_in_executor(None, _run), timeout=settings.ytdlp_timeout)
     except Exception as e:
