@@ -115,7 +115,8 @@ def download_tiktok_images(url: str, max_items: int | None = 10) -> List[str]:
         if not images:
             raise RuntimeError("No images downloaded")
 
-        images.sort(key=lambda p: os.path.getmtime(p))
+        # images.sort(key=lambda p: os.path.getmtime(p))
+        images.sort(key=lambda p: os.path.basename(p))
         if max_items is not None:
             images = images[:max_items]
 
@@ -177,7 +178,8 @@ def download_instagram_post_media(url: str, max_items: int | None = 10) -> List[
         if not media_files:
             raise RuntimeError("No media downloaded")
 
-        media_files.sort(key=lambda t: t[1])
+        # media_files.sort(key=lambda t: t[1])
+        media_files.sort(key=lambda t: os.path.basename(t[0]))
         if max_items is not None:
             media_files = media_files[:max_items]
 
