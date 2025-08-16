@@ -1,17 +1,24 @@
 from aiogram import Router, F
 from aiogram.filters import Command
-from aiogram.types import Message, FSInputFile, InputMediaPhoto, InputMediaVideo
+from aiogram.types import Message, FSInputFile, InputMediaPhoto, InputMediaVideo, InputMediaDocument
 from aiogram.exceptions import TelegramBadRequest
+
 from app.utils import is_supported_url, is_youtube_regular
-from app.features.downloader.media import extract_info, download_media, download_instagram_post_media, download_tiktok_images
+from app.features.downloader.media import (
+    extract_info,
+    download_media,
+    download_instagram_post_media,
+    download_tiktok_images,
+    download_tiktok_sound,
+)
 from app.core.telemetry import log_event
 from app.core.config import settings
 from app.core.db import Session
 from app.core.models import Download, User
+
 from sqlalchemy import select
 import os
 import asyncio
-import shutil
 import httpx
 
 router = Router()
@@ -47,7 +54,7 @@ async def handle_url(msg: Message):
                 "Попробуйте ссылку на Shorts, TikTok или Instagram Reels.",
                 parse_mode="Markdown"
             )
-        elif any(domain in text.lower() for domain in ['youtube.com', 'youtu.be', 'tiktok.com', 'instagram.com', 'instagr.am']):
+        elif any(d in text.lower() for d in ["youtube.com", "youtu.be", "tiktok.com", "instagram.com", "instagr.am"]):
             return await msg.reply("❌ Не могу обработать эту ссылку. Поддерживаю только TikTok, YouTube Shorts и Instagram Reels.")
         else:
             return
@@ -57,18 +64,17 @@ async def handle_url(msg: Message):
         url = await resolve_redirect(url)
 
     await log_event(msg.from_user.id, "get", url)
-
     loading_msg = await msg.reply("🔄 Загружаю медиа, подождите немного...")
 
     try:
         if "tiktok.com" in url and "/photo/" in url:
-            await send_tiktok_album(msg, url)
+            await send_tiktok_album(msg, url, is_photo=True)
         elif ("instagram.com" in url or "instagr.am" in url) and "/p/" in url:
             await send_instagram_post_album(msg, url)
         else:
             meta = await extract_info(url)
             if meta.extractor == "tiktok" and meta.duration is None:
-                await send_tiktok_album(msg, url)
+                await send_tiktok_album(msg, url, is_photo=True)
             else:
                 await download_and_send_both(msg, url, meta)
     except Exception as e:
@@ -79,15 +85,37 @@ async def handle_url(msg: Message):
         except TelegramBadRequest:
             pass
 
-async def send_tiktok_album(msg: Message, url: str):
+async def send_tiktok_album(msg: Message, url: str, is_photo: bool = False):
+    loop = asyncio.get_running_loop()
+
+    sound_task = loop.run_in_executor(None, lambda: download_tiktok_sound(url, is_photo=is_photo))
+
     try:
-        pics = await asyncio.get_running_loop().run_in_executor(None, lambda: download_tiktok_images(url, max_items=None))
-        for grp in [pics[i:i+10] for i in range(0, len(pics), 10)]:
+        result = await loop.run_in_executor(None, lambda: download_tiktok_images(url, max_items=None))
+        preview = result.get("preview", [])
+        originals = result.get("originals", [])
+
+        for grp in [preview[i:i+10] for i in range(0, len(preview), 10)]:
             media_group = [InputMediaPhoto(media=FSInputFile(p)) for p in grp]
             await msg.answer_media_group(media_group)
-        for p in pics:
+
+        if originals:
+            await msg.answer("📦 Оригиналы в максимальном качестве, если вы любите чёткость!")
+            for i in range(0, len(originals), 10):
+                media_group = [InputMediaDocument(media=FSInputFile(p)) for p in originals[i:i+10]]
+                await msg.answer_media_group(media_group)
+
+        try:
+            sound_path = await asyncio.wait_for(sound_task, timeout=20)
+            await save_download_stats(msg.from_user.id, url, sound_path, "audio")
+            await msg.answer_audio(audio=FSInputFile(sound_path), caption="🎵 Оригинальный звук TikTok")
+        except Exception as e:
+            await msg.answer(f"⚠️ Не удалось получить оригинальный звук: {e}")
+
+        for p in preview + originals:
             await save_download_stats(msg.from_user.id, url, p, "image")
         await log_event(msg.from_user.id, "download", f"tiktok_images:{url}")
+
     except Exception:
         await msg.reply("❌ Не удалось скачать TikTok-альбом.")
 
