@@ -1,4 +1,3 @@
-# app/core/telemetry.py
 from aiogram import BaseMiddleware
 from aiogram.types import TelegramObject
 from typing import Callable, Dict, Any, Awaitable
@@ -30,7 +29,6 @@ class UserMiddleware(BaseMiddleware):
 
             async with Session() as s:
                 try:
-                    # UPSERT по tg_id (SQLite)
                     stmt = sqlite_insert(User).values(
                         tg_id=from_user.id,
                         first_name=from_user.first_name,
@@ -48,22 +46,18 @@ class UserMiddleware(BaseMiddleware):
                     )
                     await s.execute(stmt)
 
-                    # Получаем/прикрепляем пользователя к контексту
                     user = (await s.execute(select(User).where(User.tg_id == from_user.id))).scalar_one()
                     
-                    # Создаем событие только если пользователь найден
                     if user:
                         s.add(Event(user_id=user.id, type="update"))
                         await s.commit()
                         data["db_user"] = user
                 except Exception as e:
-                    # Если что-то пошло не так, логируем но не прерываем
                     print(f"Middleware database error: {e}")
                     await s.rollback()
 
             return await handler(event, data)
         except Exception as e:
-            # Логируем ошибку, но не прерываем выполнение
             print(f"Middleware error: {e}")
             return await handler(event, data)
 
@@ -74,7 +68,6 @@ async def log_event(user_id: int, type_: str, payload: str | None = None) -> Non
     """
     try:
         async with Session() as s:
-            # Находим пользователя по tg_id
             user_result = await s.execute(select(User).where(User.tg_id == user_id))
             user = user_result.scalar()
             
@@ -82,7 +75,6 @@ async def log_event(user_id: int, type_: str, payload: str | None = None) -> Non
                 s.add(Event(user_id=user.id, type=type_, payload=payload))
                 await s.commit()
             else:
-                # Если пользователь не найден, создаем его
                 new_user = User(
                     tg_id=user_id,
                     first_name="Unknown",
@@ -94,7 +86,6 @@ async def log_event(user_id: int, type_: str, payload: str | None = None) -> Non
                 await s.commit()
                 await s.refresh(new_user)
                 
-                # Теперь создаем событие
                 s.add(Event(user_id=new_user.id, type=type_, payload=payload))
                 await s.commit()
     except Exception as e:

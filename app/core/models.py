@@ -21,7 +21,7 @@ class Event(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
     ts: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc), index=True)
-    type: Mapped[str] = mapped_column(String(32))   # start/get/download/error/…
+    type: Mapped[str] = mapped_column(String(32))
     payload: Mapped[str | None] = mapped_column(Text)
 
     user: Mapped["User"] = relationship(back_populates="events")

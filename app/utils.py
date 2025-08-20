@@ -1,6 +1,10 @@
 import re
 import os
+from typing import Optional
+from aiogram import Bot
 from urllib.parse import urlparse
+
+_BOT_MENTION: Optional[str] = None
 
 YOUTUBE_HOST_RE = re.compile(r"(?:^|\.)youtube\.com$", re.I)
 YOUTU_BE_HOST_RE = re.compile(r"(?:^|\.)youtu\.be$", re.I)
@@ -8,6 +12,14 @@ TIKTOK_HOST_RE = re.compile(r"(?:^|\.)tiktok\.com$", re.I)
 INSTAGRAM_HOST_RE = re.compile(r"(?:^|\.)instagram\.com$|(?:^|\.)instagr\.am$", re.I)
 SPOTIFY_HOST_RE = re.compile(r"(?:^|\.)spotify\.com$", re.I)
 
+async def bot_mention(bot: Bot) -> str:
+    global _BOT_MENTION
+    if _BOT_MENTION is not None:
+        return _BOT_MENTION
+
+    me = await bot.get_me()
+    _BOT_MENTION = f"@{me.username}" if me.username else ""
+    return _BOT_MENTION
 
 def _host(url: str) -> str:
     try:

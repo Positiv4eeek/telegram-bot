@@ -9,6 +9,6 @@ class Base(AsyncAttrs, DeclarativeBase):
     pass
 
 async def init_db():
-    from app.core import models  # noqa
+    from app.core import models
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)

@@ -3,7 +3,7 @@ from aiogram.filters import Command
 from aiogram.types import Message, FSInputFile, InputMediaPhoto, InputMediaVideo, InputMediaDocument
 from aiogram.exceptions import TelegramBadRequest
 
-from app.utils import is_supported_url, is_youtube_regular
+from app.utils import is_supported_url, is_youtube_regular, bot_mention
 from app.features.downloader.media import (
     extract_info,
     download_media,
@@ -90,14 +90,16 @@ async def handle_url(msg: Message):
             pass
 
 async def send_spotify_track(msg: Message, url: str):
-    """Отправляет скачанный трек из Spotify"""
+
     try:
+        mention = await bot_mention(msg.bot)
         loop = asyncio.get_running_loop()
         track_path = await loop.run_in_executor(None, lambda: download_spotify_track(url))
         
         await msg.answer_audio(
             audio=FSInputFile(track_path), 
-            caption="🎵 Трек из Spotify"
+            caption=f"🎵 <b>Спасибо что пользуетесь нашим ботом!</b> \n\n🤖 <b>{mention}</b>",
+            parse_mode="HTML"
         )
         
         await save_download_stats(msg.from_user.id, url, track_path, "audio")
@@ -128,9 +130,10 @@ async def send_tiktok_album(msg: Message, url: str, is_photo: bool = False):
                 await msg.answer_media_group(media_group)
 
         try:
+            mention = await bot_mention(msg.bot)
             sound_path = await asyncio.wait_for(sound_task, timeout=20)
             await save_download_stats(msg.from_user.id, url, sound_path, "audio")
-            await msg.answer_audio(audio=FSInputFile(sound_path), caption="🎵 Оригинальный звук TikTok")
+            await msg.answer_audio(audio=FSInputFile(sound_path), caption=f"🎵 <b>Спасибо что пользуетесь нашим ботом!</b> \n\n🤖 <b>{mention}</b>", parse_mode="HTML")
         except Exception as e:
             await msg.answer(f"⚠️ Не удалось получить оригинальный звук: {e}")
 
@@ -161,9 +164,10 @@ async def download_and_send_both(msg: Message, url: str, meta):
     audio_task = asyncio.create_task(download_media(url, kind="audio"))
     try:
         video_path, audio_path = await asyncio.gather(video_task, audio_task)
+        mention = await bot_mention(msg.bot)
         await save_download_stats(msg.from_user.id, url, video_path, "video")
         await save_download_stats(msg.from_user.id, url, audio_path, "audio")
-        await msg.answer_video(video=FSInputFile(video_path), caption=f"🎥 {meta.title}")
+        await msg.answer_video(video=FSInputFile(video_path), caption=f"🎥 <b>Спасибо что пользуетесь нашим ботом!</b> \n\n🤖 <b>{mention}</b>", supports_streaming=True, parse_mode="HTML")
         await msg.answer_audio(audio=FSInputFile(audio_path))
         await log_event(msg.from_user.id, "download", f"both:{url}")
     except Exception as e:

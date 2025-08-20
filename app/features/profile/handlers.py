@@ -10,16 +10,13 @@ router = Router()
 @router.message(Command("me"))
 async def me(msg: Message):
     try:
-        # Получаем пользователя из middleware
         tg_id = msg.from_user.id
         
         async with Session() as s:
-            # Находим пользователя по tg_id
             user_result = await s.execute(select(User).where(User.tg_id == tg_id))
             user = user_result.scalar()
             
             if not user:
-                # Если пользователь не найден, создаем базовую статистику
                 total_dl = 0
                 total_events = 0
             else:
