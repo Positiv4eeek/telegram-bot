@@ -9,10 +9,6 @@ from app.core.db import Session
 from app.core.models import User, Event
 
 class UserMiddleware(BaseMiddleware):
-    """
-    Middleware: апсертим пользователя по tg_id на каждый апдейт
-    и пишем событие 'update'. Избегает гонок UNIQUE(tg_id).
-    """
     async def __call__(
         self,
         handler: Callable[[TelegramObject, Dict[str, Any]], Awaitable[Any]],
@@ -63,9 +59,6 @@ class UserMiddleware(BaseMiddleware):
 
 
 async def log_event(user_id: int, type_: str, payload: str | None = None) -> None:
-    """
-    Быстрый логгер событий в БД (используется в фичах).
-    """
     try:
         async with Session() as s:
             user_result = await s.execute(select(User).where(User.tg_id == user_id))

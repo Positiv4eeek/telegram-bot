@@ -16,6 +16,7 @@ TT_HOST_FALLBACK = "api16-normal-c-useast1a"
 
 @dataclass
 class MediaMeta:
+    id: str | None
     title: str
     uploader: str | None
     duration: int | None
@@ -89,6 +90,7 @@ async def extract_info(url: str) -> MediaMeta:
         info = await loop.run_in_executor(None, _run)
 
         return MediaMeta(
+            id=info.get("id"),
             title=info.get("title") or "untitled",
             uploader=info.get("uploader"),
             duration=info.get("duration"),

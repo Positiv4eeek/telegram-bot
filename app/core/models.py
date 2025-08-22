@@ -1,5 +1,5 @@
 from sqlalchemy.orm import Mapped, mapped_column, relationship
-from sqlalchemy import Integer, String, BigInteger, DateTime, ForeignKey, Text, Index
+from sqlalchemy import Integer, String, BigInteger, DateTime, ForeignKey, Text, Index, UniqueConstraint
 from datetime import datetime, timedelta, timezone
 from app.core.db import Base
 
@@ -39,6 +39,29 @@ class Download(Base):
     ext: Mapped[str | None] = mapped_column(String(8))
 
     user: Mapped["User"] = relationship(back_populates="downloads")
+
+class MediaCache(Base):
+    __tablename__ = "media_cache"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+
+    source: Mapped[str] = mapped_column(String(16), index=True)
+
+    extractor: Mapped[str] = mapped_column(String(32), index=True)
+
+    media_id: Mapped[str] = mapped_column(String(128))
+
+    kind: Mapped[str] = mapped_column(String(16))
+
+    tg_file_id: Mapped[str] = mapped_column(String(512))          # для отправки
+    tg_file_unique_id: Mapped[str] = mapped_column(String(256))   # стабильная дедупликация
+
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc), index=True)
+
+    __table_args__ = (
+        UniqueConstraint("extractor", "media_id", "kind", name="uq_media_cache_key"),
+        Index("ix_media_cache_lookup", "extractor", "media_id", "kind"),
+    )
 
 class Token(Base):
     __tablename__ = "tokens"
