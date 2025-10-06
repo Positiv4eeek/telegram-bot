@@ -255,25 +255,18 @@ async def download_media(
         loop = asyncio.get_running_loop()
         max_bytes = max_mb * 1024 * 1024
 
-        # Для YouTube всегда требуем mp4/h264/aac
-        is_youtube = any(x in url for x in ["youtube.com", "youtu.be"])
-        if kind == "video" and is_youtube:
-            format_candidates = [
-                "bestvideo[ext=mp4][vcodec^=avc1]+bestaudio[ext=m4a]/best[ext=mp4]/bestvideo+bestaudio/best"
-            ]
-        else:
-            format_candidates = [
-                "bv*+ba/b[ext=mp4]/b",
-                "bv[height<=1080]+ba/b[height<=1080]",
-                "bv[height<=720]+ba/b[height<=720]",
-                "best[height<=1080]/best[height<=720]",
-                "best[ext=mp4]/best",
-                "worst[height>=360]",
-                "best"
-            ] if kind == "video" else [
-                "bestaudio[ext=m4a]/bestaudio[ext=mp3]/bestaudio/best",
-                "bestaudio/best"
-            ]
+        format_candidates = [
+            "bv*+ba/b[ext=mp4]/b",
+            "bv[height<=1080]+ba/b[height<=1080]",
+            "bv[height<=720]+ba/b[height<=720]",
+            "best[height<=1080]/best[height<=720]",
+            "best[ext=mp4]/best",
+            "worst[height>=360]",
+            "best"
+        ] if kind == "video" else [
+            "bestaudio[ext=m4a]/bestaudio[ext=mp3]/bestaudio/best",
+            "bestaudio/best"
+        ]
 
         postprocessors = [{
             "key": "FFmpegExtractAudio",
@@ -282,18 +275,6 @@ async def download_media(
         }] if kind == "audio" else []
 
         tmpdir = tempfile.mkdtemp(prefix="telegram-bot-")
-
-        def _has_video_stream(path: str) -> bool:
-            try:
-                # Проверяем наличие видеопотока через ffprobe
-                cmd = [
-                    "ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries",
-                    "stream=codec_type", "-of", "default=noprint_wrappers=1:nokey=1", path
-                ]
-                res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=10)
-                return b"video" in res.stdout
-            except Exception:
-                return False
 
         def _convert_to_mp4(src_path: str) -> str:
             root, ext = os.path.splitext(src_path)
@@ -312,7 +293,7 @@ async def download_media(
             return out_path
 
         def _run():
-            outtmpl = os.path.join(tmpdir, "%((title).80s).%(ext)s")
+            outtmpl = os.path.join(tmpdir, "%(title).80s.%(ext)s")
             last_err = None
 
             for yformat in format_candidates:
@@ -364,10 +345,6 @@ async def download_media(
                         latest = _convert_to_mp4(latest)
                     except Exception:
                         pass
-                    # Проверка наличия видеопотока
-                    if not _has_video_stream(latest):
-                        last_err = RuntimeError("Downloaded file has no video stream (black screen)")
-                        continue
 
                 if os.path.getsize(latest) > max_bytes:
                     raise RuntimeError("Produced file is larger than size limit.")

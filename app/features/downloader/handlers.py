@@ -58,16 +58,14 @@ async def start(msg: Message):
 async def handle_url(msg: Message):
     text = (msg.text or "").strip()
 
-    # Проверка: если обычное YouTube-видео, разрешаем только администраторам
-    if is_youtube_regular(text):
-        if msg.from_user.id not in settings.admin_ids:
+    if not is_supported_url(text):
+        if is_youtube_regular(text):
             return await msg.reply(
                 "❌ Поддерживаю только **YouTube Shorts**, а не обычные видео.\n"
                 "Попробуйте ссылку на Shorts, TikTok, Instagram Reels или Spotify.",
                 parse_mode="Markdown",
             )
-    elif not is_supported_url(text):
-        if any(d in text.lower() for d in [
+        elif any(d in text.lower() for d in [
             "youtube.com", "youtu.be", "tiktok.com", "instagram.com", "instagr.am", "spotify.com"
         ]):
             return await msg.reply("❌ Не могу обработать эту ссылку. Поддерживаю только TikTok, YouTube Shorts, Instagram Reels и Spotify.")
