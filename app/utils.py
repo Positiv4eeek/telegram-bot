@@ -76,27 +76,3 @@ def is_supported_url(url: str) -> bool:
         return is_tiktok(url) or is_youtube_shorts(url) or is_instagram_reel(url) or is_spotify(url)
     except Exception:
         return False
-
-def fmt_seconds(sec: int | float | None) -> str:
-    try:
-        if sec is None:
-            return "—"
-        sec = int(sec)
-        h, rem = divmod(sec, 3600)
-        m, s = divmod(rem, 60)
-        return f"{h:d}:{m:02d}:{s:02d}" if h else f"{m:02d}:{s:02d}"
-    except Exception:
-        return "—"
-
-def fmt_bytes(b: int | float | None) -> str:
-    try:
-        if not b and b != 0:
-            return "—"
-        b = float(b)
-        for u in ["B","KB","MB","GB","TB"]:
-            if b < 1024:
-                return f"{b:.1f} {u}"
-            b /= 1024
-        return f"{b:.1f} PB"
-    except Exception:
-        return "—"
